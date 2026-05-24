@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TagLens</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="tl-popup">
+    <!-- Header -->
+    <div class="tl-header">
+      <div class="tl-header-left">
+        <svg class="tl-logo" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"/>
+          <line x1="16.5" y1="16.5" x2="21" y2="21" stroke-linecap="round"/>
+          <circle cx="11" cy="11" r="3" fill="currentColor" stroke="none"/>
+        </svg>
+        <span class="tl-title">TagLens</span>
+      </div>
+      <div class="tl-header-right">
+        <label style="font-size:12px;display:inline-flex;align-items:center;gap:6px;margin-right:8px;">
+          <input type="checkbox" id="debugToggle"> Debug
+        </label>
+        <button class="tl-header-btn" id="clearBtn" title="Clear logs">✖</button>
+        <span class="tl-live-dot" id="liveDot" title="Auto-updating"></span>
+        <button class="tl-header-btn" id="refreshBtn" title="Refresh now">↻</button>
+      </div>
+    </div>
+
+    <!-- URL bar -->
+    <div class="tl-url-bar" id="urlBar">Loading...</div>
+
+    <!-- Content -->
+    <div class="tl-content" id="content">
+      <div class="tl-loading">
+        <div class="tl-spinner"></div>
+        <span>Scanning page...</span>
+      </div>
+    </div>
+
+    <!-- Hidden log area (rendered when Debug enabled) -->
+    <div id="logList" style="display:none;max-height:240px;overflow:auto;padding:8px"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

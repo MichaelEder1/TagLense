@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>TagLens - Icon Generator</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; background: #f5f5f5; }
+    canvas { border: 1px solid #ddd; margin: 10px; background: white; }
+    .info { margin-top: 20px; color: #666; }
+    button { padding: 10px 20px; margin: 5px; cursor: pointer; background: #6366f1; color: white; border: none; border-radius: 8px; font-weight: 600; }
+    button:hover { background: #4f46e5; }
+  </style>
+</head>
+<body>
+  <h1>TagLens Icon Generator</h1>
+  <p>Click the button below to download all icon sizes:</p>
+  <div>
+    <canvas id="c128" width="128" height="128"></canvas>
+    <canvas id="c48" width="48" height="48"></canvas>
+    <canvas id="c32" width="32" height="32"></canvas>
+    <canvas id="c16" width="16" height="16"></canvas>
+  </div>
+  <button onclick="downloadAll()">Download All Icons</button>
+  <div class="info">
+    <p>After downloading, place the files in the <code>icons/</code> folder of the extension.</p>
+  </div>
+
+  <script>
+    function drawIcon(canvas) {
+      const ctx = canvas.getContext('2d');
+      const size = canvas.width;
+      const scale = size / 128;
+
+      // Background - rounded square with gradient
+      const radius = 24 * scale;
+      ctx.beginPath();
+      ctx.moveTo(radius, 0);
+      ctx.lineTo(size - radius, 0);
+      ctx.quadraticCurveTo(size, 0, size, radius);
+      ctx.lineTo(size, size - radius);
+      ctx.quadraticCurveTo(size, size, size - radius, size);
+      ctx.lineTo(radius, size);
+      ctx.quadraticCurveTo(0, size, 0, size - radius);
+      ctx.lineTo(0, radius);
+      ctx.quadraticCurveTo(0, 0, radius, 0);
+      ctx.closePath();
+
+      const gradient = ctx.createLinearGradient(0, 0, size, size);
+      gradient.addColorStop(0, '#6366f1');
+      gradient.addColorStop(1, '#8b5cf6');
+      ctx.fillStyle = gradient;
+      ctx.fill();
+
+      // Lens circle (outer)
+      ctx.beginPath();
+      ctx.arc(size * 0.45, size * 0.42, size * 0.28, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.lineWidth = 4 * scale;
+      ctx.stroke();
+
+      // Lens inner dot
+      ctx.beginPath();
+      ctx.arc(size * 0.45, size * 0.42, size * 0.1, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.fill();
+
+      // Lens handle
+      ctx.beginPath();
+      ctx.moveTo(size * 0.63, size * 0.6);
+      ctx.lineTo(size * 0.82, size * 0.79);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.lineWidth = 5 * scale;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+
+      // Tag icon (small)
+      const tagX = size * 0.7;
+      const tagY = size * 0.25;
+      const tagSize = size * 0.12;
+      ctx.beginPath();
+      ctx.moveTo(tagX, tagY - tagSize);
+      ctx.lineTo(tagX + tagSize, tagY);
+      ctx.lineTo(tagX, tagY + tagSize);
+      ctx.lineTo(tagX - tagSize * 0.5, tagY + tagSize * 0.5);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.fill();
+
+      // Small crosshair lines on the lens
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.lineWidth = 1.5 * scale;
+      // Horizontal
+      ctx.beginPath();
+      ctx.moveTo(size * 0.3, size * 0.42);
+      ctx.lineTo(size * 0.6, size * 0.42);
+      ctx.stroke();
+      // Vertical
+      ctx.beginPath();
+      ctx.moveTo(size * 0.45, size * 0.27);
+      ctx.lineTo(size * 0.45, size * 0.57);
+      ctx.stroke();
+    }
+
+    // Draw all sizes
+    ['c128', 'c48', 'c32', 'c16'].forEach(id => {
+      drawIcon(document.getElementById(id));
+    });
+
+    function downloadAll() {
+      const sizes = [
+        { id: 'c128', name: 'icon128.png' },
+        { id: 'c48', name: 'icon48.png' },
+        { id: 'c32', name: 'icon32.png' },
+        { id: 'c16', name: 'icon16.png' }
+      ];
+
+      sizes.forEach(({ id, name }) => {
+        const canvas = document.getElementById(id);
+        const link = document.createElement('a');
+        link.download = name;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+      });
+    }
+  </script>
+</body>
+</html>
