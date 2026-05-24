@@ -19,10 +19,6 @@
         <span class="tl-title">TagLens</span>
       </div>
       <div class="tl-header-right">
-        <label style="font-size:12px;display:inline-flex;align-items:center;gap:6px;margin-right:8px;">
-          <input type="checkbox" id="debugToggle"> Debug
-        </label>
-        <button class="tl-header-btn" id="clearBtn" title="Clear logs">✖</button>
         <span class="tl-live-dot" id="liveDot" title="Auto-updating"></span>
         <button class="tl-header-btn" id="refreshBtn" title="Refresh now">↻</button>
       </div>
@@ -39,8 +35,7 @@
       </div>
     </div>
 
-    <!-- Hidden log area (rendered when Debug enabled) -->
-    <div id="logList" style="display:none;max-height:240px;overflow:auto;padding:8px"></div>
+    <!-- Debug UI removed -->
   </div>
 
   <script src="popup.js"></script>

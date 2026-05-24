@@ -883,31 +883,7 @@
     return null;
   }
 
-    // Debug forwarding (configurable) - forwards logs to background for popup display
-    let debugForwardEnabled = false;
-    // Initialize from chrome.storage.local (if available) and listen to changes
-    try {
-      if (typeof chrome !== 'undefined' && chrome && typeof chrome.storage !== 'undefined' && chrome.storage && typeof chrome.storage.local !== 'undefined') {
-        chrome.storage.local.get({ debugForward: false }, (res) => {
-          debugForwardEnabled = !!res.debugForward;
-        });
-      }
-      if (typeof chrome !== 'undefined' && chrome && typeof chrome.storage !== 'undefined' && chrome.storage && chrome.storage.onChanged && typeof chrome.storage.onChanged.addListener === 'function') {
-        chrome.storage.onChanged.addListener((changes, area) => {
-          if (area === 'local' && changes.debugForward) {
-            debugForwardEnabled = !!changes.debugForward.newValue;
-          }
-        });
-      }
-    } catch (e) { /* ignore */ }
-
-    function sendDebugLog(message, level = 'info') {
-      try {
-        if (!debugForwardEnabled) return;
-        const payload = { message, level, url: window.location.href, ts: Date.now() };
-        chrome.runtime.sendMessage({ action: 'debugLog', payload });
-      } catch (e) { /* ignore if runtime not available */ }
-    }
+    // Debugging removed: debug forwarding and helpers disabled
 
   // ============================================================
   // GOOGLE CONSENT MODE v2 DETECTION (IMPROVED WITH CMP APIs)
@@ -1005,7 +981,7 @@
         if (!__taglens_dataLayerConsent || JSON.stringify(__taglens_dataLayerConsent) !== sig) {
           __taglens_dataLayerConsent = normalized;
           __taglens_dataLayerConsentTs = Date.now();
-          sendDebugLog({ tag: 'dataLayer.consent', data: { parsed: normalized } }, 'info');
+          // dataLayer consent parsed
           try { notifyChange(); } catch (e) { /* ignore */ }
         }
         return true;
@@ -1098,10 +1074,10 @@
             if (resp && resp.consent) {
               __taglens_pageCookiebotConsent = resp.consent;
               __taglens_cookiebotResolvedAt = Date.now();
-              sendDebugLog({ tag: 'Cookiebot.pageRead', data: { resolved: true } }, 'info');
+              // Cookiebot page read resolved
             } else {
               __taglens_cookiebotBridgeFailed = true;
-              sendDebugLog({ tag: 'Cookiebot.pageRead', data: { resolved: false, error: resp && resp.error } }, 'info');
+              // Cookiebot page read failed
             }
           } catch (e) { __taglens_cookiebotBridgeFailed = true; }
         });
@@ -1116,7 +1092,7 @@
       if (ev && ev.detail) {
         __taglens_pageCookiebotConsent = ev.detail.consent || null;
         __taglens_cookiebotResolvedAt = Date.now();
-        sendDebugLog({ tag: 'Cookiebot.pageEvent', data: { resolved: !!__taglens_pageCookiebotConsent } }, 'info');
+        // Cookiebot page event received
       }
     } catch (e) { /* ignore */ }
   }, false);
@@ -1152,7 +1128,7 @@
           // Cache the last known consent states to avoid flapping
           __taglens_lastConsentStates = computed;
           __taglens_lastConsentTs = Date.now();
-          sendDebugLog({ tag: 'consentSource', data: { source: 'dataLayer', ts: __taglens_dataLayerConsentTs } }, 'info');
+          // consent source: dataLayer
           return computed;
         }
       }
@@ -1164,7 +1140,6 @@
     try {
       // Only attempt and log if we haven't tried the page bridge yet
       if (!__taglens_cookiebotBridgeAttempted && !__taglens_cookiebotBridgeFailed) {
-        console.log("Checking for Cookiebot consent via page bridge...");
         try { requestCookiebotConsentFromPage(); } catch (e) { /* ignore */ }
       }
 
@@ -1175,7 +1150,7 @@
         const CACHE_MAX_MS = 5000;
         if (__taglens_pageCookiebotConsent !== null && (Date.now() - __taglens_cookiebotResolvedAt) < CACHE_MAX_MS) {
           cb = __taglens_pageCookiebotConsent;
-          sendDebugLog({ tag: 'Cookiebot.consent', data: { resolved: true, source: 'pageEvent' } }, 'info');
+          // Cookiebot.consent resolved from pageEvent
         }
       } catch (e) { /* ignore */ }
 
@@ -1199,13 +1174,13 @@
                 }
               }
             } catch (err) {
-              sendDebugLog({ tag: 'Cookiebot.consent.error', error: String(err) }, 'error');
+              // Cookiebot.consent retrieval error
             }
           }
         } catch (e) { /* ignore */ }
       }
 
-      sendDebugLog({ tag: 'Cookiebot.consent.attempt', data: { resolved: !!cb, source: cb ? (__taglens_pageCookiebotConsent ? 'pageEvent' : 'inline') : 'none' } }, 'info');
+      // Cookiebot consent attempt logged
 
       if (cb && typeof cb === 'object') {
         states['analytics_storage'] = cb.statistics ? 'granted' : 'denied';

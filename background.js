@@ -1,33 +1,5 @@
 // TagLens - Background service worker
-// Stores recent debug logs and forwards broadcasts to popup
-
-let debugLogs = [];
-
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (!message || !message.action) return;
-
-  if (message.action === 'debugLog') {
-    const entry = Object.assign({}, message.payload || {}, { fromTab: sender.tab ? sender.tab.id : null });
-    debugLogs.push(entry);
-    if (debugLogs.length > 300) debugLogs.shift();
-    // Broadcast to any listeners (popup)
-    try {
-      chrome.runtime.sendMessage({ action: 'debugLogBroadcast', payload: entry });
-    } catch (e) { /* ignore */ }
-    return; // no response
-  }
-
-  if (message.action === 'getDebugLogs') {
-    sendResponse({ logs: debugLogs.slice().reverse() });
-    return true;
-  }
-
-  if (message.action === 'clearDebugLogs') {
-    debugLogs = [];
-    sendResponse({ ok: true });
-    return true;
-  }
-});
+// Background message handlers
 // TagLens - Background Service Worker
 // Routes messages between popup and content scripts
 
