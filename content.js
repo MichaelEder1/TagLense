@@ -56,36 +56,9 @@
             }
           }
         });
-        // Also check dataLayer and gtag queue for dynamic config calls
-        try {
-          if (window.dataLayer && Array.isArray(window.dataLayer)) {
-            window.dataLayer.forEach(entry => {
-              try {
-                if (Array.isArray(entry) && entry[0] === 'config' && typeof entry[1] === 'string') {
-                  const m = entry[1].match(/G-[A-Z0-9]+/);
-                  if (m && !ids.includes(m[0])) ids.push(m[0]);
-                }
-                if (entry && typeof entry === 'object') {
-                  const txt = JSON.stringify(entry);
-                  const m2 = txt.match(/G-[A-Z0-9]+/g);
-                  if (m2) m2.forEach(mid => { if (!ids.includes(mid)) ids.push(mid); });
-                }
-              } catch (e) { /* ignore */ }
-            });
-          }
-        } catch (e) { /* ignore */ }
-        try {
-          if (window.gtag && Array.isArray(window.gtag.q)) {
-            window.gtag.q.forEach(q => {
-              try {
-                if (Array.isArray(q) && q[0] === 'config' && typeof q[1] === 'string') {
-                  const m = q[1].match(/G-[A-Z0-9]+/);
-                  if (m && !ids.includes(m[0])) ids.push(m[0]);
-                }
-              } catch (e) { /* ignore */ }
-            });
-          }
-        } catch (e) { /* ignore */ }
+        // Tags fired purely from inside a GTM container (no visible script
+        // or inline text) surface here via the mainworld.js dataLayer relay.
+        __taglens_liveConfigIds['Google Analytics 4'].forEach(id => { if (!ids.includes(id)) ids.push(id); });
         return ids.length > 0 ? ids : null;
       }
     },
@@ -111,38 +84,9 @@
         if (document.querySelector('script[src*="pagead2.googlesyndication.com"]')) {
           if (!ids.includes('AdSense')) ids.push('AdSense');
         }
-        // Also inspect dataLayer and gtag queue for dynamic gtag config calls (AW-...)
-        try {
-          if (window.dataLayer && Array.isArray(window.dataLayer)) {
-            window.dataLayer.forEach(entry => {
-              try {
-                if (Array.isArray(entry) && entry[0] === 'config' && typeof entry[1] === 'string') {
-                  const m = entry[1].match(/AW-[0-9]+/);
-                  if (m && !ids.includes(m[0])) ids.push(m[0]);
-                }
-                // Some implementations push objects with 'config' calls as arrays nested inside
-                if (entry && typeof entry === 'object') {
-                  const txt = JSON.stringify(entry);
-                  const m2 = txt.match(/AW-[0-9]+/g);
-                  if (m2) m2.forEach(mid => { if (!ids.includes(mid)) ids.push(mid); });
-                }
-              } catch (e) { /* ignore entry parse errors */ }
-            });
-          }
-        } catch (e) { /* ignore */ }
-
-        try {
-          if (window.gtag && Array.isArray(window.gtag.q)) {
-            window.gtag.q.forEach(q => {
-              try {
-                if (Array.isArray(q) && q[0] === 'config' && typeof q[1] === 'string') {
-                  const m = q[1].match(/AW-[0-9]+/);
-                  if (m && !ids.includes(m[0])) ids.push(m[0]);
-                }
-              } catch (e) { /* ignore */ }
-            });
-          }
-        } catch (e) { /* ignore */ }
+        // Tags fired purely from inside a GTM container (no visible script
+        // or inline text) surface here via the mainworld.js dataLayer relay.
+        __taglens_liveConfigIds['Google Ads'].forEach(id => { if (!ids.includes(id)) ids.push(id); });
         return ids.length > 0 ? ids : null;
       }
     },
@@ -160,7 +104,9 @@
           });
           if (ids.length === 0) ids.push('Detected');
         }
-        // Try to read active trackers via ga.getAll()
+        // Try to read active trackers via ga.getAll() - only works if this
+        // page happens to expose ga() synchronously; usually invisible from
+        // here (isolated world), kept as a harmless best-effort attempt.
         try {
           if (window.ga && typeof window.ga.getAll === 'function') {
             const all = window.ga.getAll();
@@ -176,18 +122,7 @@
             }
           }
         } catch (e) { /* ignore */ }
-        // Fallback: search dataLayer for UA- strings
-        try {
-          if (window.dataLayer && Array.isArray(window.dataLayer)) {
-            window.dataLayer.forEach(entry => {
-              try {
-                const txt = JSON.stringify(entry);
-                const m = txt.match(/UA-[0-9]+-[0-9]+/g);
-                if (m) m.forEach(mid => { if (!ids.includes(mid)) ids.push(mid); });
-              } catch (e) { /* ignore */ }
-            });
-          }
-        } catch (e) { /* ignore */ }
+        __taglens_liveConfigIds['Universal Analytics'].forEach(id => { if (!ids.includes(id)) ids.push(id); });
         return ids.length > 0 ? ids : null;
       }
     },
@@ -805,85 +740,21 @@
         }
         return null;
       }
+    },
+    {
+      name: 'Sourcepoint',
+      icon: '🔷',
+      detect: () => {
+        if (document.querySelector('script[src*="sourcepoint.com"], script[src*="sp-prod.net"], iframe[src*="sourcepoint"]') || window._sp_) {
+          return 'Active';
+        }
+        return null;
+      }
     }
   ];
 
-  // ============================================================
-  // KNOWN COOKIE-TO-SERVICE MAPPING
-  // ============================================================
-  const COOKIE_SERVICE_MAP = {
-    '_ga': 'Google Analytics',
-    '_ga_': 'Google Analytics 4',
-    '_gid': 'Google Analytics',
-    '_gat': 'Google Analytics',
-    '_gcl_au': 'Google Ads',
-    '_gcl_aw': 'Google Ads',
-    '_gac_': 'Google Ads',
-    '_fbp': 'Meta/Facebook',
-    '_fbc': 'Meta/Facebook',
-    'fr': 'Meta/Facebook',
-    '_ttp': 'TikTok',
-    '_tt_enable_cookie': 'TikTok',
-    'MUID': 'Microsoft',
-    '_uetsid': 'Microsoft Ads',
-    '_uetvid': 'Microsoft Ads',
-    '_clck': 'Microsoft Clarity',
-    '_clsk': 'Microsoft Clarity',
-    'li_sugr': 'LinkedIn',
-    'bcookie': 'LinkedIn',
-    'lidc': 'LinkedIn',
-    '_pin_unauth': 'Pinterest',
-    'IDE': 'Google DoubleClick',
-    'test_cookie': 'Google DoubleClick',
-    'NID': 'Google',
-    '1P_JAR': 'Google',
-    'CONSENT': 'Google',
-    '_hjid': 'Hotjar',
-    '_hjSessionUser': 'Hotjar',
-    '_hjSession': 'Hotjar',
-    '_hjAbsoluteSessionInProgress': 'Hotjar',
-    'hubspotutk': 'HubSpot',
-    '__hssc': 'HubSpot',
-    '__hssrc': 'HubSpot',
-    '__hstc': 'HubSpot',
-    'CookieConsent': 'Cookiebot',
-    'OptanonConsent': 'OneTrust',
-    'OptanonAlertBoxClosed': 'OneTrust',
-    'eupubconsent-v2': 'IAB TCF v2',
-    'didomi_token': 'Didomi',
-    'uc_settings': 'Usercentrics',
-    'ajs_anonymous_id': 'Segment',
-    'mp_': 'Mixpanel',
-    'amplitude_id': 'Amplitude',
-    '_pk_id': 'Matomo',
-    '_pk_ses': 'Matomo',
-    'crit': 'Criteo',
-    'cto_bundle': 'Criteo',
-    '__adroll': 'AdRoll',
-    '_scid': 'Snapchat',
-    'sc_at': 'Snapchat',
-    'personalization_id': 'Twitter/X',
-    'guest_id': 'Twitter/X',
-    'YSC': 'YouTube',
-    'VISITOR_INFO1_LIVE': 'YouTube',
-    'wp-settings': 'WordPress',
-    'wordpress_logged_in': 'WordPress',
-    'PHPSESSID': 'PHP Session',
-    'JSESSIONID': 'Java Session',
-    'ASP.NET_SessionId': 'ASP.NET Session',
-    'cf_clearance': 'Cloudflare',
-    '__cf_bm': 'Cloudflare',
-  };
-
-  function getServiceForCookie(cookieName) {
-    if (COOKIE_SERVICE_MAP[cookieName]) return COOKIE_SERVICE_MAP[cookieName];
-    for (const [prefix, service] of Object.entries(COOKIE_SERVICE_MAP)) {
-      if (prefix.endsWith('_') && cookieName.startsWith(prefix)) return service;
-    }
-    return null;
-  }
-
-    // Debugging removed: debug forwarding and helpers disabled
+  // Cookie detection (including httpOnly cookies) now lives in background.js,
+  // the only context with access to chrome.cookies.
 
   // ============================================================
   // GOOGLE CONSENT MODE v2 DETECTION (IMPROVED WITH CMP APIs)
@@ -899,11 +770,74 @@
   let __taglens_lastConsentStates = null;
   let __taglens_lastConsentTs = 0;
 
-  // DataLayer consent cache and hooks
+  // Human-readable label for where the last consent reading came from
+  let __taglens_consentSource = null;
+
+  // Snapshot relayed from mainworld.js (window.UC_UI/Didomi/klaro/OneTrust/
+  // google_tag_data.ics all live in the page's MAIN world and are invisible
+  // from this isolated-world script - mainworld.js reads them and forwards
+  // the result here via CustomEvent).
+  let __taglens_cmpBridge = null;
+  window.addEventListener('TagLens:cmpSnapshot', function (ev) {
+    try { __taglens_cmpBridge = ev.detail || null; notifyChange(); } catch (e) { /* ignore */ }
+  });
+
+  // IAB TCF v2 (__tcfapi) snapshot, also relayed from mainworld.js.
+  let __taglens_tcf = null;
+  window.addEventListener('TagLens:tcfData', function (ev) {
+    try { __taglens_tcf = ev.detail || null; notifyChange(); } catch (e) { /* ignore */ }
+  });
+
+  // User-defined custom tracker patterns from the options page ([{name, pattern}]).
+  let __taglens_customTrackers = [];
+  function loadCustomTrackers() {
+    try {
+      chrome.storage.sync.get('customTrackers', (data) => {
+        if (chrome.runtime.lastError) return;
+        __taglens_customTrackers = Array.isArray(data && data.customTrackers) ? data.customTrackers : [];
+      });
+    } catch (e) { /* ignore */ }
+  }
+  loadCustomTrackers();
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'sync' && changes.customTrackers) loadCustomTrackers();
+    });
+  } catch (e) { /* ignore */ }
+  window.addEventListener('TagLens:dataLayerEntry', function (ev) {
+    try { updateDataLayerConsentFromEntry(ev.detail); } catch (e) { /* ignore */ }
+    try { updateLiveConfigIdsFromEntry(ev.detail); } catch (e) { /* ignore */ }
+  });
+
+  // Tags GTM fires purely from inside its own container often never appear
+  // as a <script> tag or literal inline gtag() call text - GTM's bundle
+  // calls the page's real gtag()/dataLayer.push() at runtime instead, which
+  // mainworld.js already relays here. Catch config calls (gtag('config',
+  // 'G-XXXX' | 'AW-XXXX' | 'UA-XXXX-Y')) so those IDs show up immediately,
+  // not just once/if a matching network request happens to fire later.
+  const __taglens_liveConfigIds = { 'Google Analytics 4': [], 'Google Ads': [], 'Universal Analytics': [] };
+  function updateLiveConfigIdsFromEntry(entry) {
+    try {
+      if (!entry) return;
+      let id = null;
+      if (entry['0'] === 'config' && typeof entry['1'] === 'string') id = entry['1'];
+      else if (Array.isArray(entry) && entry[0] === 'config' && typeof entry[1] === 'string') id = entry[1];
+      if (!id) return;
+      let bucket = null;
+      if (/^G-/.test(id)) bucket = 'Google Analytics 4';
+      else if (/^AW-/.test(id)) bucket = 'Google Ads';
+      else if (/^UA-/.test(id)) bucket = 'Universal Analytics';
+      if (!bucket) return;
+      if (!__taglens_liveConfigIds[bucket].includes(id)) {
+        __taglens_liveConfigIds[bucket].push(id);
+        notifyChange();
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  // DataLayer consent cache, fed by mainworld.js's TagLens:dataLayerEntry events
   let __taglens_dataLayerConsent = null;
   let __taglens_dataLayerConsentTs = 0;
-  let __taglens_dataLayerLastIndex = 0;
-  let __taglens_dataLayerWatcherId = null;
 
   function normalizeConsentValue(v) {
     if (v === true) return 'granted';
@@ -977,9 +911,16 @@
         // Normalize values
         const normalized = {};
         Object.keys(parsed).forEach(k => { normalized[k] = normalizeConsentValue(parsed[k]); });
-        const sig = JSON.stringify(normalized);
+        // Merge into the existing cache rather than replacing it: GTM/Consent
+        // Mode typically pushes a 'default' event with ALL categories, then
+        // later partial 'update' events with only the categories that
+        // changed. Replacing wholesale would make previously-known
+        // categories flip back to "not set" every time a partial update
+        // arrives.
+        const merged = Object.assign({}, __taglens_dataLayerConsent || {}, normalized);
+        const sig = JSON.stringify(merged);
         if (!__taglens_dataLayerConsent || JSON.stringify(__taglens_dataLayerConsent) !== sig) {
-          __taglens_dataLayerConsent = normalized;
+          __taglens_dataLayerConsent = merged;
           __taglens_dataLayerConsentTs = Date.now();
           // dataLayer consent parsed
           try { notifyChange(); } catch (e) { /* ignore */ }
@@ -989,79 +930,6 @@
     } catch (e) { /* ignore */ }
     return false;
   }
-
-  function hookDataLayer() {
-    try {
-      if (window.dataLayer && Array.isArray(window.dataLayer)) {
-        // process historical entries
-        try { window.dataLayer.forEach(e => updateDataLayerConsentFromEntry(e)); } catch (e) { /* ignore */ }
-
-        // monkeypatch push to observe future entries
-        try {
-          const origPush = window.dataLayer.push.bind(window.dataLayer);
-          if (!origPush.__taglens_patched) {
-            const patched = function () {
-              const args = Array.from(arguments);
-              let res = null;
-              try { res = origPush.apply(null, args); } catch (e) { try { res = origPush.apply(window.dataLayer, args); } catch (e2) { /* ignore */ } }
-              try { args.forEach(a => updateDataLayerConsentFromEntry(a)); } catch (e) { /* ignore */ }
-              return res;
-            };
-            patched.__taglens_patched = true;
-            try { window.dataLayer.push = patched; } catch (e) { /* ignore */ }
-          }
-        } catch (e) { /* ignore */ }
-        // start a persistent watcher to catch replacements or missed pushes
-        try { startDataLayerWatcher(); } catch (e) { /* ignore */ }
-        return true;
-      }
-      // If dataLayer not present yet, watch for its creation briefly
-      let tries = 0;
-      const intv = setInterval(() => {
-        tries++;
-        if (window.dataLayer && Array.isArray(window.dataLayer)) {
-          clearInterval(intv);
-          hookDataLayer();
-        } else if (tries > 20) {
-          clearInterval(intv);
-        }
-      }, 250);
-    } catch (e) { /* ignore */ }
-    return false;
-  }
-
-  function startDataLayerWatcher() {
-    try {
-      if (__taglens_dataLayerWatcherId) return;
-      __taglens_dataLayerLastIndex = 0;
-      // If dataLayer exists now, set last index to its length
-      if (window.dataLayer && Array.isArray(window.dataLayer)) {
-        __taglens_dataLayerLastIndex = window.dataLayer.length;
-      }
-      __taglens_dataLayerWatcherId = setInterval(() => {
-        try {
-          if (!window.dataLayer || !Array.isArray(window.dataLayer)) {
-            // dataLayer might be recreated; reset index
-            __taglens_dataLayerLastIndex = 0;
-            return;
-          }
-          const len = window.dataLayer.length;
-          if (len > __taglens_dataLayerLastIndex) {
-            for (let i = __taglens_dataLayerLastIndex; i < len; i++) {
-              try { updateDataLayerConsentFromEntry(window.dataLayer[i]); } catch (e) { /* ignore */ }
-            }
-            __taglens_dataLayerLastIndex = len;
-          }
-          // If dataLayer was replaced with a shorter/new array, process its entries from start
-          if (len < __taglens_dataLayerLastIndex) {
-            try { window.dataLayer.forEach(entry => updateDataLayerConsentFromEntry(entry)); } catch (e) { /* ignore */ }
-            __taglens_dataLayerLastIndex = len;
-          }
-        } catch (e) { /* ignore */ }
-      }, 500);
-    } catch (e) { /* ignore */ }
-  }
-
 
   function requestCookiebotConsentFromPage() {
     try {
@@ -1108,16 +976,12 @@
     ];
 
     const states = {};
+    __taglens_consentSource = null;
 
-    // Highest priority: dataLayer-derived consent (live updates)
+    // Highest priority: dataLayer-derived consent (live updates, fed by
+    // mainworld.js relaying real dataLayer.push calls via CustomEvent -
+    // window.dataLayer itself is not readable from this isolated world).
     try {
-      // Actively scan the current dataLayer entries to pick up consent pushes that may have occurred
-      try {
-        if (window.dataLayer && Array.isArray(window.dataLayer)) {
-          window.dataLayer.forEach(entry => { try { updateDataLayerConsentFromEntry(entry); } catch (e) { /* ignore */ } });
-        }
-      } catch (e) { /* ignore */ }
-
       if (__taglens_dataLayerConsent && typeof __taglens_dataLayerConsent === 'object') {
         const cache = __taglens_dataLayerConsent;
         consentCategories.forEach(cat => {
@@ -1128,7 +992,7 @@
           // Cache the last known consent states to avoid flapping
           __taglens_lastConsentStates = computed;
           __taglens_lastConsentTs = Date.now();
-          // consent source: dataLayer
+          __taglens_consentSource = 'dataLayer (Consent Mode)';
           return computed;
         }
       }
@@ -1189,93 +1053,71 @@
         states['ad_personalization'] = cb.marketing ? 'granted' : 'denied';
         states['functionality_storage'] = cb.preferences ? 'granted' : 'denied';
         states['personalization_storage'] = cb.preferences ? 'granted' : 'denied';
+        __taglens_consentSource = 'Cookiebot';
         return consentCategories.map(cat => ({ ...cat, state: states[cat.key] || 'not set' }));
       }
     } catch (e) { /* ignore */ }
 
-    // Usercentrics: Call UC_UI methods to get consent status
+    // Usercentrics/Didomi/Klaro/OneTrust/google_tag_data.ics all live as JS
+    // globals in the page's MAIN world, invisible from here - read the
+    // snapshot mainworld.js already computed and relayed via CustomEvent.
+    const bridge = __taglens_cmpBridge;
+
+    // Usercentrics
     try {
-      if (window.UC_UI && typeof window.UC_UI.getServices === 'function') {
-        try {
-          const services = window.UC_UI.getServices();
-          if (services && Array.isArray(services)) {
-            // Find consent categories in services
-            let hasAnalytics = false, hasMarketing = false, hasPreferences = false;
-            services.forEach(s => {
-              if (s.consent === true || s.status === 'ACCEPTED') {
-                if (s.categorySlug === 'analytics') hasAnalytics = true;
-                if (s.categorySlug === 'marketing') hasMarketing = true;
-                if (s.categorySlug === 'preferences') hasPreferences = true;
-              }
-            });
-            if (!Object.keys(states).length) {
-              states['analytics_storage'] = hasAnalytics ? 'granted' : 'denied';
-              states['ad_storage'] = hasMarketing ? 'granted' : 'denied';
-              states['ad_user_data'] = hasMarketing ? 'granted' : 'denied';
-              states['ad_personalization'] = hasMarketing ? 'granted' : 'denied';
-              states['functionality_storage'] = hasPreferences ? 'granted' : 'denied';
-              states['personalization_storage'] = hasPreferences ? 'granted' : 'denied';
-              return consentCategories.map(cat => ({ ...cat, state: states[cat.key] || 'not set' }));
-            }
-          }
-        } catch (e) { /* try alternative UC_UI method */ }
+      if (bridge && bridge.usercentrics) {
+        const { hasAnalytics, hasMarketing, hasPreferences } = bridge.usercentrics;
+        if (!Object.keys(states).length) {
+          states['analytics_storage'] = hasAnalytics ? 'granted' : 'denied';
+          states['ad_storage'] = hasMarketing ? 'granted' : 'denied';
+          states['ad_user_data'] = hasMarketing ? 'granted' : 'denied';
+          states['ad_personalization'] = hasMarketing ? 'granted' : 'denied';
+          states['functionality_storage'] = hasPreferences ? 'granted' : 'denied';
+          states['personalization_storage'] = hasPreferences ? 'granted' : 'denied';
+          __taglens_consentSource = 'Usercentrics';
+          return consentCategories.map(cat => ({ ...cat, state: states[cat.key] || 'not set' }));
+        }
       }
     } catch (e) { /* ignore */ }
 
-    // Didomi: Call Didomi API to get consent status
+    // Didomi
     try {
-      if (window.Didomi && typeof window.Didomi.isConsentRequired === 'function') {
-        const purposes = ['analytics', 'marketing', 'functional'];
-        let analytics = false, marketing = false, functional = false;
-        try {
-          if (typeof window.Didomi.getUserConsentStatusForPurpose === 'function') {
-            analytics = window.Didomi.getUserConsentStatusForPurpose('analytics') === true;
-            marketing = window.Didomi.getUserConsentStatusForPurpose('marketing') === true;
-            functional = window.Didomi.getUserConsentStatusForPurpose('functional') === true;
-            if (!Object.keys(states).length) {
-              states['analytics_storage'] = analytics ? 'granted' : 'denied';
-              states['ad_storage'] = marketing ? 'granted' : 'denied';
-              states['ad_user_data'] = marketing ? 'granted' : 'denied';
-              states['ad_personalization'] = marketing ? 'granted' : 'denied';
-              states['functionality_storage'] = functional ? 'granted' : 'denied';
-              states['personalization_storage'] = functional ? 'granted' : 'denied';
-              return consentCategories.map(cat => ({ ...cat, state: states[cat.key] || 'not set' }));
-            }
-          }
-        } catch (e) { /* fallback */ }
+      if (bridge && bridge.didomi) {
+        const { analytics, marketing, functional } = bridge.didomi;
+        if (!Object.keys(states).length) {
+          states['analytics_storage'] = analytics ? 'granted' : 'denied';
+          states['ad_storage'] = marketing ? 'granted' : 'denied';
+          states['ad_user_data'] = marketing ? 'granted' : 'denied';
+          states['ad_personalization'] = marketing ? 'granted' : 'denied';
+          states['functionality_storage'] = functional ? 'granted' : 'denied';
+          states['personalization_storage'] = functional ? 'granted' : 'denied';
+          __taglens_consentSource = 'Didomi';
+          return consentCategories.map(cat => ({ ...cat, state: states[cat.key] || 'not set' }));
+        }
       }
     } catch (e) { /* ignore */ }
 
-    // Klaro: Call klaro API to get cookie consents
+    // Klaro
     try {
-      if (window.klaro && typeof window.klaro.getCookieConsents === 'function') {
-        const consents = window.klaro.getCookieConsents();
-        if (consents && typeof consents === 'object') {
-          let hasAnalytics = false, hasMarketing = false, hasRequired = false;
-          Object.keys(consents).forEach(key => {
-            if (consents[key] === true) {
-              if (key.toLowerCase().includes('analytics') || key.toLowerCase().includes('google')) hasAnalytics = true;
-              if (key.toLowerCase().includes('marketing') || key.toLowerCase().includes('facebook') || key.toLowerCase().includes('ads')) hasMarketing = true;
-              if (key.toLowerCase().includes('required') || key.toLowerCase().includes('necessary')) hasRequired = true;
-            }
-          });
-          if (!Object.keys(states).length) {
-            states['analytics_storage'] = hasAnalytics ? 'granted' : 'denied';
-            states['ad_storage'] = hasMarketing ? 'granted' : 'denied';
-            states['ad_user_data'] = hasMarketing ? 'granted' : 'denied';
-            states['ad_personalization'] = hasMarketing ? 'granted' : 'denied';
-            states['functionality_storage'] = hasRequired ? 'granted' : 'denied';
-            states['personalization_storage'] = hasRequired ? 'granted' : 'denied';
-            return consentCategories.map(cat => ({ ...cat, state: states[cat.key] || 'not set' }));
-          }
+      if (bridge && bridge.klaro) {
+        const { hasAnalytics, hasMarketing, hasRequired } = bridge.klaro;
+        if (!Object.keys(states).length) {
+          states['analytics_storage'] = hasAnalytics ? 'granted' : 'denied';
+          states['ad_storage'] = hasMarketing ? 'granted' : 'denied';
+          states['ad_user_data'] = hasMarketing ? 'granted' : 'denied';
+          states['ad_personalization'] = hasMarketing ? 'granted' : 'denied';
+          states['functionality_storage'] = hasRequired ? 'granted' : 'denied';
+          states['personalization_storage'] = hasRequired ? 'granted' : 'denied';
+          __taglens_consentSource = 'Klaro';
+          return consentCategories.map(cat => ({ ...cat, state: states[cat.key] || 'not set' }));
         }
       }
     } catch (e) { /* ignore */ }
 
     // === PRIORITY 2: OneTrust Active Groups ===
     try {
-      if (window.OnetrustActiveGroups || window.OptanonActiveGroups) {
-        const groups = (window.OnetrustActiveGroups || window.OptanonActiveGroups || '').split(',').filter(Boolean);
+      if (bridge && bridge.oneTrustGroups) {
+        const groups = bridge.oneTrustGroups;
         // OneTrust groups: C0001=necessary, C0002=performance/analytics, C0003=functional, C0004=targeting/marketing
         if (!Object.keys(states).length) {
           states['analytics_storage'] = groups.includes('C0002') ? 'granted' : 'denied';
@@ -1283,73 +1125,23 @@
           states['ad_storage'] = groups.includes('C0004') ? 'granted' : 'denied';
           states['ad_user_data'] = groups.includes('C0004') ? 'granted' : 'denied';
           states['ad_personalization'] = groups.includes('C0004') ? 'granted' : 'denied';
+          __taglens_consentSource = 'OneTrust';
           return consentCategories.map(cat => ({ ...cat, state: states[cat.key] || 'not set' }));
         }
       }
     } catch (e) { /* ignore */ }
 
-    // === PRIORITY 3: dataLayer (Google Tag Manager format) ===
+    // === PRIORITY 3: google_tag_data.ics (relayed via bridge) ===
     try {
-      if (window.dataLayer && Array.isArray(window.dataLayer)) {
-        let foundUpdate = false;
-        for (let i = window.dataLayer.length - 1; i >= 0; i--) {
-          const entry = window.dataLayer[i];
-          if (!entry) continue;
-
-          let action = null;
-          let consentData = null;
-
-          // Format A: Object with numeric keys {"0": "consent", "1": "update", "2": {...}}
-          if (entry['0'] === 'consent' && (entry['1'] === 'update' || entry['1'] === 'default')) {
-            action = entry['1'];
-            consentData = entry['2'];
-          }
-          // Format B: Actual array ["consent", "update", {...}]
-          else if (Array.isArray(entry) && entry[0] === 'consent' && (entry[1] === 'update' || entry[1] === 'default')) {
-            action = entry[1];
-            consentData = entry[2];
-          }
-          // Format C: gtag-style event
-          else if (entry.event === 'consent_update' || entry.event === 'consent_default') {
-            action = entry.event.includes('update') ? 'update' : 'default';
-            consentData = entry;
-          }
-
-          if (consentData && typeof consentData === 'object') {
-            if (action === 'update' && !foundUpdate) {
-              consentCategories.forEach(cat => {
-                if (consentData[cat.key]) {
-                  states[cat.key] = consentData[cat.key];
-                }
-              });
-              foundUpdate = true;
-              break;
-            }
-          }
-        }
-        if (Object.keys(states).length) {
-          return consentCategories.map(cat => ({ ...cat, state: states[cat.key] || 'not set' }));
-        }
-      }
-    } catch (e) { /* ignore */ }
-
-    // === PRIORITY 4: google_tag_data.ics ===
-    try {
-      if (window.google_tag_data && window.google_tag_data.ics && window.google_tag_data.ics.entries) {
-        const ics = window.google_tag_data.ics;
+      if (bridge && bridge.googleTagDataIcs) {
+        const ics = bridge.googleTagDataIcs;
         consentCategories.forEach(cat => {
-          if (!states[cat.key]) {
-            const entry = ics.entries[cat.key];
-            if (entry) {
-              if (typeof entry.update !== 'undefined') {
-                states[cat.key] = entry.update ? 'granted' : 'denied';
-              } else if (typeof entry.default !== 'undefined') {
-                states[cat.key] = entry.default ? 'granted' : 'denied';
-              }
-            }
+          if (!states[cat.key] && typeof ics[cat.key] === 'boolean') {
+            states[cat.key] = ics[cat.key] ? 'granted' : 'denied';
           }
         });
         if (Object.keys(states).length) {
+          __taglens_consentSource = 'Google Consent Mode (google_tag_data.ics)';
           return consentCategories.map(cat => ({ ...cat, state: states[cat.key] || 'not set' }));
         }
       }
@@ -1363,6 +1155,7 @@
       if (hasExplicit) {
         __taglens_lastConsentStates = computed;
         __taglens_lastConsentTs = Date.now();
+        __taglens_consentSource = __taglens_consentSource || 'heuristic';
         return computed;
       }
     } catch (e) { /* ignore */ }
@@ -1370,6 +1163,7 @@
     // No explicit data this run — fall back to last known states if available
     try {
       if (__taglens_lastConsentStates && (Date.now() - __taglens_lastConsentTs) < 60 * 60 * 1000) {
+        __taglens_consentSource = __taglens_consentSource || 'cached (last known reading)';
         // return cached states (within 1 hour)
         return __taglens_lastConsentStates;
       }
@@ -1379,32 +1173,9 @@
   }
 
   // ============================================================
-  // COOKIE DETECTION
-  // ============================================================
-  function detectCookies() {
-    const cookies = [];
-    const cookieString = document.cookie;
-    if (cookieString) {
-      cookieString.split(';').forEach(cookie => {
-        const parts = cookie.trim().split('=');
-        const name = parts[0];
-        const value = parts.slice(1).join('=');
-        cookies.push({
-          name: name,
-          value: value.length > 60 ? value.substring(0, 60) + '...' : value,
-          service: getServiceForCookie(name) || 'Unknown'
-        });
-      });
-    }
-    return cookies.sort((a, b) => {
-      if (a.service === 'Unknown' && b.service !== 'Unknown') return 1;
-      if (a.service !== 'Unknown' && b.service === 'Unknown') return -1;
-      return a.service.localeCompare(b.service);
-    });
-  }
-
-  // ============================================================
-  // RUN FULL DETECTION
+  // RUN FULL DETECTION (per-frame DOM findings only - cookies and
+  // network-only tags are handled by background.js, which is the only
+  // context with access to chrome.cookies / chrome.webRequest)
   // ============================================================
   function runDetection() {
     const detectedTrackers = [];
@@ -1413,6 +1184,14 @@
         const result = tracker.detect();
         if (result) {
           detectedTrackers.push({ name: tracker.name, icon: tracker.icon, ids: result });
+        }
+      } catch (e) { /* ignore */ }
+    });
+
+    __taglens_customTrackers.forEach(custom => {
+      try {
+        if (document.querySelector(`script[src*="${CSS.escape(custom.pattern)}"]`)) {
+          detectedTrackers.push({ name: custom.name, icon: '🔧', ids: ['Detected'] });
         }
       } catch (e) { /* ignore */ }
     });
@@ -1428,20 +1207,20 @@
     });
 
     const consentStates = detectConsentStates();
-    const cookies = detectCookies();
 
     return {
       detectedTrackers,
       detectedCMPs,
       consentStates,
-      cookies,
+      consentSource: __taglens_consentSource,
+      tcf: __taglens_tcf,
       url: window.location.href,
       timestamp: Date.now()
     };
   }
 
   // ============================================================
-  // MESSAGE LISTENER - Respond to popup requests
+  // MESSAGE LISTENER - Respond to popup requests / background triggers
   // ============================================================
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'getData') {
@@ -1450,6 +1229,13 @@
         sendResponse(data);
       } catch (e) { /* ignore */ }
       // Response sent synchronously.
+      return false;
+    }
+
+    if (message.action === 'forceRecheck') {
+      // Background saw a SPA soft-navigation (webNavigation.onHistoryStateUpdated)
+      // and wants an immediate re-scan instead of waiting for the next poll.
+      try { checkForChanges(true); } catch (e) { /* ignore */ }
       return false;
     }
 
@@ -1485,16 +1271,15 @@
 
   function notifyChange() {
     try {
-      // Send a lightweight notification and also push the full data to background for immediate popup update
-      try {
-        const data = runDetection();
-        chrome.runtime.sendMessage({ action: 'dataUpdate', payload: data });
-      } catch (e) { /* ignore runDetection errors */ }
-      chrome.runtime.sendMessage({ action: 'dataChanged' });
-    } catch (e) { /* popup not open */ }
+      const data = runDetection();
+      // Report this frame's DOM findings to background, which aggregates
+      // across all frames of the tab, merges in network-detected trackers,
+      // and is the only context that can read the real cookie jar.
+      chrome.runtime.sendMessage({ action: 'frameDetection', payload: data }).catch(() => {});
+    } catch (e) { /* background not reachable (e.g. extension reloading) */ }
   }
 
-  function checkForChanges() {
+  function checkForChanges(force) {
     const currentUrl = window.location.href;
     const currentScriptCount = document.querySelectorAll('script').length;
     const currentCookies = document.cookie;
@@ -1502,7 +1287,7 @@
     // Quick tracker signature check to detect dynamically injected trackers
     const currentSignature = generateTrackerSignature();
 
-    if (currentUrl !== lastUrl || currentScriptCount !== lastScriptCount || currentCookies !== lastCookieString || currentSignature !== lastDetectedSignature) {
+    if (force || currentUrl !== lastUrl || currentScriptCount !== lastScriptCount || currentCookies !== lastCookieString || currentSignature !== lastDetectedSignature) {
       lastUrl = currentUrl;
       lastScriptCount = currentScriptCount;
       lastCookieString = currentCookies;
@@ -1549,7 +1334,19 @@
   });
 
   observer.observe(document.documentElement, { childList: true, subtree: true });
-  // Start observing dataLayer for consent events
-  try { hookDataLayer(); } catch (e) { /* ignore */ }
+
+  // Ask mainworld.js for an immediate CMP/dataLayer snapshot rather than
+  // waiting for its next periodic tick.
+  try { window.dispatchEvent(new CustomEvent('TagLens:requestSnapshot')); } catch (e) { /* ignore */ }
+
+  // We inject at document_start so early inline consent-default pushes and
+  // pushState overrides aren't missed - but that also means the very first
+  // scan can run before the document has any content. Report once right
+  // away (cheap, mostly empty), then force full re-scans once the DOM is
+  // actually populated so SSR pages that stream in content are captured too.
+  try { notifyChange(); } catch (e) { /* ignore */ }
+  document.addEventListener('DOMContentLoaded', () => { try { checkForChanges(true); } catch (e) { /* ignore */ } });
+  window.addEventListener('load', () => { try { checkForChanges(true); } catch (e) { /* ignore */ } });
+  setTimeout(() => { try { checkForChanges(true); } catch (e) { /* ignore */ } }, 3000);
 
 })();

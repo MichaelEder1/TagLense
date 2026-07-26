@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TagLens Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="tl-opts">
+    <div class="tl-opts-header">
+      <span class="tl-opts-title">TagLens Settings</span>
+      <span class="tl-opts-sub">Changes apply immediately on every open tab</span>
+    </div>
+
+    <div class="tl-opts-section">
+      <h2>Custom trackers</h2>
+      <p class="tl-opts-hint">Add a name and a piece of the request/script domain to detect trackers not built in (e.g. a first-party analytics subdomain).</p>
+      <form id="customForm" class="tl-custom-form">
+        <input type="text" id="customName" placeholder="Name (e.g. Acme Analytics)" required />
+        <input type="text" id="customPattern" placeholder="Domain pattern (e.g. analytics.acme.com)" required />
+        <button type="submit">Add</button>
+      </form>
+      <div id="customList" class="tl-custom-list"></div>
+    </div>
+
+    <div class="tl-opts-section">
+      <h2>Trackers</h2>
+      <p class="tl-opts-hint">Uncheck anything you don't want cluttering results.</p>
+      <div id="trackerList" class="tl-checklist"></div>
+    </div>
+
+    <div class="tl-opts-section">
+      <h2>Consent management platforms</h2>
+      <div id="cmpList" class="tl-checklist"></div>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
