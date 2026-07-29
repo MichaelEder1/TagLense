@@ -807,7 +807,53 @@
   window.addEventListener('TagLens:dataLayerEntry', function (ev) {
     try { updateDataLayerConsentFromEntry(ev.detail); } catch (e) { /* ignore */ }
     try { updateLiveConfigIdsFromEntry(ev.detail); } catch (e) { /* ignore */ }
+    try { reportDataLayerEvent(ev.detail); } catch (e) { /* ignore */ }
   });
+
+  // Debug feed: every dataLayer push, shown in the panel so you can see what
+  // a page is actually sending without opening GTM's own preview mode. Must
+  // never silently drop an entry just because its shape is unfamiliar - a
+  // very common real pattern is a plain "set these variables" push with no
+  // 'event' key at all (e.g. dataLayer.push({userId: '123'})), which the
+  // event/command-shaped branches below don't recognize.
+  function formatDataLayerEntry(entry) {
+    try {
+      if (!entry || typeof entry !== 'object') return null;
+      let name, params;
+      if (typeof entry.event === 'string') {
+        name = entry.event;
+        params = Object.assign({}, entry);
+        delete params.event;
+      } else if (entry['0'] !== undefined) {
+        // gtag-style command array/arguments: ['config'|'event'|'consent'|'set'|'js', target, params]
+        const cmd = String(entry['0']);
+        if (cmd === 'event' && typeof entry['1'] === 'string') {
+          name = entry['1'];
+          params = (entry['2'] && typeof entry['2'] === 'object') ? entry['2'] : {};
+        } else {
+          name = cmd;
+          params = {};
+          if (entry['1'] !== undefined && typeof entry['1'] !== 'object') params.target = entry['1'];
+          if (entry['2'] && typeof entry['2'] === 'object') Object.assign(params, entry['2']);
+          else if (entry['1'] && typeof entry['1'] === 'object') Object.assign(params, entry['1']);
+        }
+      } else {
+        // No 'event' key, not a command array - a plain variables push.
+        name = '(variables)';
+        params = Object.assign({}, entry);
+      }
+      if (!params || typeof params !== 'object') params = {};
+      return { name: name || '(push)', params };
+    } catch (e) { return null; }
+  }
+
+  function reportDataLayerEvent(entry) {
+    const formatted = formatDataLayerEntry(entry);
+    if (!formatted) return;
+    try {
+      chrome.runtime.sendMessage({ action: 'dataLayerEvent', payload: { name: formatted.name, params: formatted.params, ts: Date.now() } }).catch(() => {});
+    } catch (e) { /* ignore */ }
+  }
 
   // Tags GTM fires purely from inside its own container often never appear
   // as a <script> tag or literal inline gtag() call text - GTM's bundle

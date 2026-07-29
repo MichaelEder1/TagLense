@@ -7,8 +7,16 @@
 let currentTabId = null;
 let autoRefreshInterval = null;
 let lastData = null;
-let clearArmed = false;
-let clearArmTimer = null;
+let searchQuery = '';
+
+// renderData() rebuilds every section from scratch on every refresh (live
+// pushes can fire many times a minute), so any collapse/expand the user did
+// by hand has to be captured before the rebuild and re-applied after -
+// otherwise a section snaps back to its hardcoded default on the very next
+// update, which is especially jarring for a fast-moving one like DataLayer
+// Events. Keyed by section title; only used for sections the user has
+// actually touched, everything else keeps its normal default.
+const collapsedState = {};
 
 document.addEventListener('DOMContentLoaded', () => {
   loadData();
@@ -16,7 +24,30 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('refreshBtn').addEventListener('click', loadData);
   document.getElementById('exportBtn').addEventListener('click', exportReport);
   document.getElementById('clearDataBtn').addEventListener('click', handleClearDataClick);
+
+  const searchInput = document.getElementById('searchInput');
+  const searchClearBtn = document.getElementById('searchClearBtn');
+  searchInput.addEventListener('input', () => {
+    searchQuery = searchInput.value.trim().toLowerCase();
+    searchClearBtn.hidden = !searchQuery;
+    if (lastData) renderData(lastData);
+  });
+  searchClearBtn.addEventListener('click', () => {
+    searchQuery = '';
+    searchInput.value = '';
+    searchClearBtn.hidden = true;
+    searchInput.focus();
+    if (lastData) renderData(lastData);
+  });
 });
+
+// A section's items are shown as-is when there's no active search; when
+// searching, only items whose searchable text contains the query survive,
+// and the section is hidden entirely if nothing in it matches.
+function matchesSearch(text) {
+  if (!searchQuery) return true;
+  return text.toLowerCase().includes(searchQuery);
+}
 
 // Background broadcasts this whenever any tab's detection state changes.
 chrome.runtime.onMessage.addListener((message) => {
@@ -128,7 +159,8 @@ function exportReport() {
     consentSource: lastData.consentSource,
     tcf: lastData.tcf || null,
     cookies: lastData.cookies,
-    activity: lastData.events || []
+    activity: lastData.events || [],
+    dataLayerEvents: lastData.dataLayerEvents || []
   };
   const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -144,30 +176,31 @@ function exportReport() {
 }
 
 function handleClearDataClick() {
-  const btn = document.getElementById('clearDataBtn');
-  if (!clearArmed) {
-    clearArmed = true;
-    btn.classList.add('tl-armed');
-    btn.title = 'Click again to confirm - this deletes cookies, cache & storage for this site';
-    clearArmTimer = setTimeout(() => {
-      clearArmed = false;
-      btn.classList.remove('tl-armed');
-      btn.title = 'Clear cookies, cache & storage for this site';
-    }, 4000);
-    return;
-  }
-  clearArmed = false;
-  clearTimeout(clearArmTimer);
-  btn.classList.remove('tl-armed');
-  btn.title = 'Clear cookies, cache & storage for this site';
-
   if (!currentTabId) return;
+  // A native confirm() is a single unambiguous step - no custom double-click
+  // timing window to get wrong, no state to fall out of sync.
+  const ok = window.confirm('Clear cookies, cache, and storage for this site? The page will reload.');
+  if (!ok) return;
+
+  // If background never responds (service worker died mid-flight, message
+  // port closed, ...) the button would otherwise just look dead with no
+  // feedback at all - always resolve one way or another.
+  let settled = false;
+  const timeout = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    showToast('Clear timed out - try again');
+  }, 10000);
+
   chrome.runtime.sendMessage({ action: 'clearSiteData', tabId: currentTabId }, (resp) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timeout);
     if (chrome.runtime.lastError || !resp || !resp.ok) {
       showToast('Could not clear site data');
       return;
     }
-    showToast('Site data cleared');
+    showToast('Site data cleared - page reloaded');
     loadData();
   });
 }
@@ -177,14 +210,23 @@ function handleClearDataClick() {
 // ============================================================
 function renderData(data) {
   const content = document.getElementById('content');
+
+  // Capture whatever the user currently has collapsed/expanded before we
+  // blow the DOM away and rebuild it.
+  content.querySelectorAll('.tl-section').forEach(sec => {
+    const title = sec.querySelector('.tl-section-title');
+    if (title) collapsedState[title.textContent] = sec.classList.contains('collapsed');
+  });
+
   content.innerHTML = '';
 
   // Activity Section
-  const events = data.events || [];
+  const allEvents = data.events || [];
+  const events = allEvents.filter(ev => matchesSearch(ev.label));
   content.appendChild(buildSection(
     '📡', 'Activity', events.length,
     events.length === 0
-      ? '<div class="tl-empty">No changes yet - this updates live as you browse</div>'
+      ? `<div class="tl-empty">${searchQuery ? 'No activity matches "' + escapeHtml(searchQuery) + '"' : 'No changes yet - this updates live as you browse'}</div>`
       : events.map(ev => `
           <div class="tl-activity-row">
             <span class="tl-activity-dot tl-kind-${ev.kind}"></span>
@@ -193,18 +235,24 @@ function renderData(data) {
               <div class="tl-activity-time">${relativeTime(ev.ts)}</div>
             </div>
           </div>
-        `).join('')
+        `).join(''),
+    allEvents.length === 0
   ));
 
   // Trackers Section
+  const allTrackers = data.detectedTrackers;
+  const trackers = allTrackers.filter(t => matchesSearch(t.name + ' ' + (t.ids || []).join(' ')));
   content.appendChild(buildSection(
-    '🔎', 'Tracking Scripts', data.detectedTrackers.length,
-    data.detectedTrackers.length === 0
-      ? '<div class="tl-empty">No tracking scripts detected</div>'
-      : data.detectedTrackers.map(t => {
+    '🔎', 'Tracking Scripts', trackers.length,
+    trackers.length === 0
+      ? `<div class="tl-empty">${searchQuery ? 'No trackers match "' + escapeHtml(searchQuery) + '"' : 'No tracking scripts detected'}</div>`
+      : trackers.map(t => {
           const sources = t.sources || [];
           const idText = t.ids && t.ids.length ? t.ids.join(', ') : 'Detected';
           const viaNetworkOnly = sources.includes('network') && !sources.includes('script');
+          const tags = [];
+          if (viaNetworkOnly) tags.push('<span class="tl-source-tag" title="Only seen as a network request, not in the page DOM - typically means it fired after a consent action or via server-side tagging">network</span>');
+          if (t.consentWarning) tags.push(`<span class="tl-warning-tag">⚠ ${escapeHtml(t.consentWarning.label)} denied</span>`);
           return `
           <div class="tl-item">
             <span class="tl-item-icon">${t.icon}</span>
@@ -212,18 +260,20 @@ function renderData(data) {
               <span class="tl-item-name">${escapeHtml(t.name)}</span>
               <span class="tl-item-id">${escapeHtml(idText)}</span>
             </div>
-            ${viaNetworkOnly ? '<span class="tl-source-tag" title="Only seen as a network request, not in the page DOM - typically means it fired after a consent action or via server-side tagging">network</span>' : ''}
+            ${tags.length ? `<div class="tl-item-tags">${tags.join('')}</div>` : ''}
           </div>
         `;
         }).join('')
   ));
 
   // CMP Section
+  const allCmps = data.detectedCMPs;
+  const cmps = allCmps.filter(c => matchesSearch(c.name + ' ' + c.id));
   content.appendChild(buildSection(
-    '🛡️', 'Consent Management', data.detectedCMPs.length,
-    data.detectedCMPs.length === 0
-      ? '<div class="tl-empty">No CMP detected</div>'
-      : data.detectedCMPs.map(c => `
+    '🛡️', 'Consent Management', cmps.length,
+    cmps.length === 0
+      ? `<div class="tl-empty">${searchQuery ? 'No CMPs match "' + escapeHtml(searchQuery) + '"' : 'No CMP detected'}</div>`
+      : cmps.map(c => `
           <div class="tl-item">
             <span class="tl-item-icon">${c.icon}</span>
             <div class="tl-item-info">
@@ -285,25 +335,62 @@ function renderData(data) {
   }
 
   // Cookies Section
+  const allCookies = data.cookies;
+  const cookies = allCookies.filter(c => matchesSearch(c.name + ' ' + c.service + ' ' + c.domain));
   content.appendChild(buildSection(
-    '🍪', 'Cookies', data.cookies.length,
-    data.cookies.length === 0
-      ? '<div class="tl-empty">No cookies found</div>'
-      : data.cookies.map(c => {
-          const flags = [];
-          if (c.httpOnly) flags.push('httpOnly');
-          if (c.secure) flags.push('secure');
-          const title = `${c.value}${flags.length ? ' • ' + flags.join(', ') : ''}${c.domain ? ' • ' + c.domain : ''}`;
+    '🍪', 'Cookies', cookies.length,
+    cookies.length === 0
+      ? `<div class="tl-empty">${searchQuery ? 'No cookies match "' + escapeHtml(searchQuery) + '"' : 'No cookies found'}</div>`
+      : cookies.map(c => {
           return `
           <div class="tl-cookie-row">
-            <span class="tl-cookie-name" title="${escapeHtml(title)}">
-              <span>${escapeHtml(c.name)}</span>
-              ${c.httpOnly ? '<span class="tl-http-only-tag" title="Not readable by page JavaScript (document.cookie) - only visible via the browser cookie jar">httpOnly</span>' : ''}
-            </span>
-            <span class="tl-cookie-svc ${c.service === 'Unknown' ? 'tl-unknown' : ''}">${escapeHtml(c.service)}</span>
+            <div class="tl-cookie-main">
+              <span class="tl-cookie-name" title="${escapeHtml(c.value)}">
+                <span>${escapeHtml(c.name)}</span>
+                ${c.httpOnly ? '<span class="tl-http-only-tag" title="Not readable by page JavaScript (document.cookie) - only visible via the browser cookie jar">httpOnly</span>' : ''}
+              </span>
+              <span class="tl-cookie-svc ${c.service === 'Unknown' ? 'tl-unknown' : ''}">${escapeHtml(c.service)}</span>
+            </div>
+            <div class="tl-cookie-meta">
+              <span class="tl-party-tag ${c.firstParty ? 'tl-first-party' : 'tl-third-party'}">${c.firstParty ? '1st-party' : '3rd-party'}</span>
+              <span>${escapeHtml(c.domain)}</span>
+              <span>SameSite: ${escapeHtml(c.sameSite || 'unspecified')}</span>
+              <span>Expires: ${escapeHtml(c.expiry)}</span>
+              ${c.secure ? '<span>Secure</span>' : ''}
+            </div>
           </div>
         `;
         }).join('')
+  ));
+
+  // DataLayer Events Section (debug feed - collapsed by default, it's a
+  // power-user tool for checking what a page is actually sending to GTM).
+  // Everything here is shown directly, nothing behind a hover tooltip.
+  const allDlEvents = data.dataLayerEvents || [];
+  const dlEvents = allDlEvents.filter(e => matchesSearch(e.name + ' ' + JSON.stringify(e.params || {})));
+  content.appendChild(buildSection(
+    '📨', 'DataLayer Events', dlEvents.length,
+    dlEvents.length === 0
+      ? `<div class="tl-empty">${searchQuery ? 'No events match "' + escapeHtml(searchQuery) + '"' : 'No dataLayer.push() calls seen yet'}</div>`
+      : dlEvents.map(e => {
+          const paramKeys = Object.keys(e.params || {});
+          const paramRows = paramKeys.map(k => `
+            <div class="tl-dl-param-row">
+              <span class="tl-dl-param-key">${escapeHtml(k)}</span>
+              <span class="tl-dl-param-val">${escapeHtml(formatParamValue(e.params[k]))}</span>
+            </div>
+          `).join('');
+          return `
+          <div class="tl-dl-row">
+            <div class="tl-dl-head">
+              <span class="tl-dl-name">${escapeHtml(e.name)}</span>
+              <span class="tl-activity-time">${relativeTime(e.ts)}</span>
+            </div>
+            ${paramRows ? `<div class="tl-dl-params">${paramRows}</div>` : '<div class="tl-dl-params tl-dl-empty">(no params)</div>'}
+          </div>
+        `;
+        }).join(''),
+    true
   ));
 
   content.querySelectorAll('.tl-section-head').forEach(header => {
@@ -315,12 +402,18 @@ function renderData(data) {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); header.click(); }
     });
   });
+}
 
-  // Collapse the Activity section by default when there's nothing in it yet.
-  if (events.length === 0) {
-    const first = content.querySelector('.tl-section');
-    if (first) first.classList.add('collapsed');
+function formatParamValue(v) {
+  let s;
+  if (v && typeof v === 'object') {
+    try { s = JSON.stringify(v); } catch (e) { s = String(v); }
+  } else {
+    s = String(v);
   }
+  // Nothing here is behind a hover/tooltip, so don't truncate so hard that
+  // the value becomes useless - just wrap long ones instead (see CSS).
+  return s.length > 300 ? s.slice(0, 300) + '…' : s;
 }
 
 function relativeTime(ts) {
@@ -332,9 +425,18 @@ function relativeTime(ts) {
   return new Date(ts).toLocaleDateString();
 }
 
-function buildSection(icon, title, count, bodyHtml) {
+function buildSection(icon, title, count, bodyHtml, defaultCollapsed) {
   const section = document.createElement('div');
-  section.className = 'tl-section';
+  // While actively searching, force open any section with a match so
+  // results aren't hidden behind a collapsed header - collapsedState (the
+  // user's own manual choice) takes back over the instant the search is
+  // cleared. Otherwise: respect whatever the user last had this section
+  // set to, only falling back to the caller's default the very first time
+  // a section with this title is ever rendered.
+  const collapsed = searchQuery
+    ? count === 0
+    : (Object.prototype.hasOwnProperty.call(collapsedState, title) ? collapsedState[title] : !!defaultCollapsed);
+  section.className = 'tl-section' + (collapsed ? ' collapsed' : '');
   section.innerHTML = `
     <div class="tl-section-head">
       <div class="tl-section-left">

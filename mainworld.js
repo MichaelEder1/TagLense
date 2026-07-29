@@ -15,8 +15,48 @@
 (function () {
   'use strict';
 
-  function safeClone(v) {
-    try { return JSON.parse(JSON.stringify(v)); } catch (e) { return null; }
+  // A blanket JSON.parse(JSON.stringify(v)) drops the ENTIRE entry the
+  // moment anything inside it isn't cleanly serializable - and real
+  // dataLayer pushes routinely contain functions (callbacks), DOM nodes, or
+  // circular references (a nested object pointing back at window, an
+  // element, etc). Walk it by hand instead so one awkward value doesn't
+  // erase an otherwise-useful push from the debug feed.
+  function safeClone(v, seen, depth) {
+    seen = seen || new WeakSet();
+    depth = depth || 0;
+    if (v === null || v === undefined) return null;
+    const t = typeof v;
+    if (t === 'string') return v.length > 500 ? v.slice(0, 500) + '…' : v;
+    if (t === 'number' || t === 'boolean') return v;
+    if (t === 'function') return '[Function]';
+    if (t !== 'object') return String(v);
+
+    if (depth >= 6) return Array.isArray(v) ? '[Array]' : '[Object]';
+    if (seen.has(v)) return '[Circular]';
+
+    if (typeof Node !== 'undefined' && v instanceof Node) return '[DOMNode]';
+    if (typeof Window !== 'undefined' && v instanceof Window) return '[Window]';
+
+    seen.add(v);
+    try {
+      if (Array.isArray(v)) {
+        return v.slice(0, 50).map((item) => safeClone(item, seen, depth + 1));
+      }
+      const out = {};
+      let count = 0;
+      for (const key in v) {
+        if (count >= 50) break;
+        try {
+          out[key] = safeClone(v[key], seen, depth + 1);
+          count++;
+        } catch (e) { /* skip unreadable property */ }
+      }
+      return out;
+    } catch (e) {
+      return null;
+    } finally {
+      seen.delete(v);
+    }
   }
 
   function dispatchEntry(entry) {
@@ -30,6 +70,10 @@
   function hookDataLayer() {
     if (window.dataLayer && Array.isArray(window.dataLayer)) {
       window.dataLayer.forEach(dispatchEntry);
+      // Shared with the interval fallback below - the patched push must
+      // keep this in sync too, otherwise the interval sees "new" entries
+      // that were already dispatched by the patch and reports them twice.
+      let lastLen = window.dataLayer.length;
       try {
         const origPush = window.dataLayer.push.bind(window.dataLayer);
         if (!origPush.__taglensPatched) {
@@ -37,6 +81,7 @@
             const args = Array.prototype.slice.call(arguments);
             const res = origPush.apply(window.dataLayer, args);
             args.forEach(dispatchEntry);
+            lastLen = window.dataLayer.length;
             return res;
           };
           patched.__taglensPatched = true;
@@ -46,7 +91,6 @@
 
       // Catch entries pushed via a reference that bypassed our patch, or a
       // wholesale array replacement.
-      let lastLen = window.dataLayer.length;
       setInterval(() => {
         try {
           if (!window.dataLayer || !Array.isArray(window.dataLayer)) { lastLen = 0; return; }

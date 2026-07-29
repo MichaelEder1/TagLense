@@ -133,6 +133,33 @@ function getServiceForCookie(name) {
   return null;
 }
 
+// Best-effort mapping of tracker -> the Consent Mode category it should
+// respect, used to flag "this tag fired while its own category was denied".
+// This is inherently approximate (real compliance rules vary by CMP/config,
+// and Google's Advanced Consent Mode can legitimately send cookieless pings
+// while denied) so the UI phrases it as a thing to verify, not a verdict.
+const TRACKER_CONSENT_CATEGORY = {
+  'Google Analytics 4': 'analytics_storage',
+  'Universal Analytics': 'analytics_storage',
+  'Google Ads': 'ad_storage',
+  'Meta Pixel': 'ad_storage',
+  'TikTok Pixel': 'ad_storage',
+  'Microsoft Ads (UET)': 'ad_storage',
+  'LinkedIn Insight': 'ad_storage',
+  'Pinterest Tag': 'ad_storage',
+  'Twitter/X Pixel': 'ad_storage',
+  'Snapchat Pixel': 'ad_storage',
+  'Hotjar': 'analytics_storage',
+  'Microsoft Clarity': 'analytics_storage',
+  'Matomo/Piwik': 'analytics_storage',
+  'Adobe Analytics': 'analytics_storage',
+  'HubSpot': 'analytics_storage',
+  'Segment': 'analytics_storage',
+  'Criteo': 'ad_storage',
+  'Taboola': 'ad_storage',
+  'Outbrain': 'ad_storage'
+};
+
 const DEFAULT_CONSENT_CATEGORIES = [
   { key: 'ad_storage', label: 'Ad Storage', description: 'Enables storage for advertising' },
   { key: 'analytics_storage', label: 'Analytics Storage', description: 'Enables storage for analytics' },
@@ -148,7 +175,7 @@ const DEFAULT_CONSENT_CATEGORIES = [
 const tabState = new Map(); // tabId -> state
 
 function freshTabState() {
-  return { frames: {}, networkTrackers: {}, url: null, events: [], seenTrackers: [], lastConsent: null };
+  return { frames: {}, networkTrackers: {}, networkTrackerHosts: {}, url: null, events: [], seenTrackers: [], seenWarnings: [], lastConsent: null, dataLayerEvents: [] };
 }
 
 async function getTabState(tabId) {
@@ -207,6 +234,18 @@ chrome.webRequest.onBeforeRequest.addListener(
           changed = true;
         }
       });
+      // Remember which real hostnames belong to which tracker, scoped to
+      // just what actually fired on this page - used to pull in that
+      // tracker's own cookies (third-party) without ever blanket-fetching
+      // every cookie for a whole ad-tech domain we haven't actually seen.
+      try {
+        const host = new URL(details.url).hostname;
+        state.networkTrackerHosts = state.networkTrackerHosts || {};
+        if (!state.networkTrackerHosts[host]) {
+          state.networkTrackerHosts[host] = matches[0].name;
+          changed = true;
+        }
+      } catch (e) { /* ignore */ }
       if (changed) {
         persistTabState(details.tabId, state);
         await processTabUpdate(details.tabId, state);
@@ -249,25 +288,65 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 // ============================================================
 // COOKIES (real cookie jar, including httpOnly - document.cookie can't see those)
 // ============================================================
-async function getCookiesForTab(tabId) {
+const SAME_SITE_LABELS = { no_restriction: 'None', lax: 'Lax', strict: 'Strict', unspecified: '(default)' };
+
+function formatExpiry(c) {
+  if (c.session || !c.expirationDate) return 'Session';
+  const ms = c.expirationDate * 1000 - Date.now();
+  if (ms <= 0) return 'Expired';
+  const days = ms / 86400000;
+  if (days < 1) return Math.ceil(ms / 3600000) + 'h';
+  if (days < 90) return Math.ceil(days) + 'd';
+  return Math.round(days / 365 * 10) / 10 + 'y';
+}
+
+function mapCookie(c, firstParty, trackerName) {
+  return {
+    name: c.name,
+    value: c.value.length > 60 ? c.value.substring(0, 60) + '...' : c.value,
+    domain: c.domain,
+    httpOnly: c.httpOnly,
+    secure: c.secure,
+    sameSite: SAME_SITE_LABELS[c.sameSite] || c.sameSite,
+    expiry: formatExpiry(c),
+    firstParty,
+    service: getServiceForCookie(c.name) || trackerName || 'Unknown'
+  };
+}
+
+async function getCookiesForTab(tabId, state) {
   try {
     const tab = await chrome.tabs.get(tabId);
     if (!tab || !tab.url || !/^https?:/i.test(tab.url)) return [];
-    const cookies = await chrome.cookies.getAll({ url: tab.url });
-    return cookies
-      .map(c => ({
-        name: c.name,
-        value: c.value.length > 60 ? c.value.substring(0, 60) + '...' : c.value,
-        domain: c.domain,
-        httpOnly: c.httpOnly,
-        secure: c.secure,
-        service: getServiceForCookie(c.name) || 'Unknown'
-      }))
-      .sort((a, b) => {
-        if (a.service === 'Unknown' && b.service !== 'Unknown') return 1;
-        if (a.service !== 'Unknown' && b.service === 'Unknown') return -1;
-        return a.service.localeCompare(b.service);
-      });
+
+    const firstPartyCookies = await chrome.cookies.getAll({ url: tab.url });
+    const seen = new Set(firstPartyCookies.map(c => c.domain + '|' + c.name + '|' + c.path));
+    const results = firstPartyCookies.map(c => mapCookie(c, true, null));
+
+    // Third-party cookies: only for hostnames we've actually observed
+    // firing on THIS page (state.networkTrackerHosts) - never a blanket
+    // fetch of every cookie for a whole ad-tech domain we haven't seen,
+    // which would pull in unrelated data (e.g. someone's Google sign-in
+    // cookies) that has nothing to do with this page.
+    const trackerHosts = (state && state.networkTrackerHosts) || {};
+    for (const host of Object.keys(trackerHosts)) {
+      try {
+        const cookies = await chrome.cookies.getAll({ domain: host });
+        cookies.forEach(c => {
+          const key = c.domain + '|' + c.name + '|' + c.path;
+          if (seen.has(key)) return;
+          seen.add(key);
+          results.push(mapCookie(c, false, trackerHosts[host]));
+        });
+      } catch (e) { /* ignore */ }
+    }
+
+    return results.sort((a, b) => {
+      if (a.firstParty !== b.firstParty) return a.firstParty ? -1 : 1;
+      if (a.service === 'Unknown' && b.service !== 'Unknown') return 1;
+      if (a.service !== 'Unknown' && b.service === 'Unknown') return -1;
+      return a.service.localeCompare(b.service);
+    });
   } catch (e) {
     return [];
   }
@@ -332,6 +411,18 @@ function computeMergedSnapshot(state) {
 
   userOptions.disabledDetectors.forEach(name => { trackerMap.delete(name); cmpMap.delete(name); });
 
+  // Flag trackers that fired while their own consent category is denied -
+  // the classic "tag firing without consent" compliance issue.
+  const consentByKey = Object.fromEntries(consentStates.map(c => [c.key, c.state]));
+  trackerMap.forEach(t => {
+    const category = TRACKER_CONSENT_CATEGORY[t.name];
+    if (category && consentByKey[category] === 'denied') {
+      t.consentWarning = { category, label: CONSENT_LABELS[category] || category };
+    } else {
+      t.consentWarning = null;
+    }
+  });
+
   return {
     detectedTrackers: Array.from(trackerMap.values()),
     detectedCMPs: Array.from(cmpMap.values()),
@@ -378,12 +469,23 @@ async function processTabUpdate(tabId, state) {
   }
   state.lastConsent = Object.fromEntries(snap.consentStates.map(c => [c.key, c.state]));
 
+  state.seenWarnings = state.seenWarnings || [];
+  snap.detectedTrackers.forEach(t => {
+    const warnKey = t.name + '|' + (t.consentWarning ? t.consentWarning.category : '');
+    if (t.consentWarning && !state.seenWarnings.includes(warnKey)) {
+      state.seenWarnings.push(warnKey);
+      pushEvent(state, 'warning', `⚠️ ${t.name} active while ${t.consentWarning.label} is denied`);
+      changed = true;
+    }
+  });
+
   if (changed) persistTabState(tabId, state);
 
+  const warningCount = snap.detectedTrackers.filter(t => t.consentWarning).length;
   try {
     const count = snap.detectedTrackers.length;
     chrome.action.setBadgeText({ tabId, text: count ? String(count) : '' });
-    chrome.action.setBadgeBackgroundColor({ tabId, color: '#7c3aed' });
+    chrome.action.setBadgeBackgroundColor({ tabId, color: warningCount ? '#dc2626' : '#7c3aed' });
   } catch (e) { /* ignore */ }
 
   return snap;
@@ -392,7 +494,7 @@ async function processTabUpdate(tabId, state) {
 async function buildTabSnapshot(tabId) {
   const state = await getTabState(tabId);
   const snap = await processTabUpdate(tabId, state);
-  const cookies = await getCookiesForTab(tabId);
+  const cookies = await getCookiesForTab(tabId, state);
 
   return {
     detectedTrackers: snap.detectedTrackers,
@@ -402,6 +504,7 @@ async function buildTabSnapshot(tabId) {
     tcf: snap.tcf,
     cookies,
     events: state.events || [],
+    dataLayerEvents: state.dataLayerEvents || [],
     url: state.url,
     timestamp: Date.now()
   };
@@ -437,6 +540,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // async
   }
 
+  if (message.action === 'dataLayerEvent') {
+    const tabId = sender && sender.tab && sender.tab.id;
+    if (tabId == null || !message.payload) return false;
+    (async () => {
+      const state = await getTabState(tabId);
+      state.dataLayerEvents = state.dataLayerEvents || [];
+      state.dataLayerEvents.unshift(message.payload);
+      if (state.dataLayerEvents.length > 50) state.dataLayerEvents.length = 50;
+      persistTabState(tabId, state);
+      broadcastChange();
+    })();
+    return false;
+  }
+
   if (message.action === 'clearSiteData') {
     const tabId = message.tabId;
     if (tabId == null) { sendResponse({ ok: false, error: 'no_tab' }); return false; }
@@ -454,6 +571,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           { origins: [origin], since: 0 },
           { cookies: true, cache: true, cacheStorage: true, fileSystems: true, indexedDB: true, localStorage: true, serviceWorkers: true, webSQL: true }
         );
+        // A page keeps running with whatever it already loaded until it's
+        // reloaded - without this the clear looks like it did nothing. Fire
+        // this off without awaiting it: a page with its own beforeunload
+        // handler (or just a slow/stuck navigation) can make tabs.reload()
+        // hang indefinitely, and awaiting it here would block sendResponse
+        // forever - the button would look dead even though the clear itself
+        // already succeeded.
+        chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => {});
         broadcastChange();
         sendResponse({ ok: true, origin });
       } catch (e) {
